@@ -600,6 +600,15 @@ fi
 
 do_test_update "nullos" "3"
 
+# Remove installed nullos test GuestOS versions from data partition to free
+# disk space for the kernel update test. Uses control remove_guestos which
+# removes the latest version each call, so call once per installed version.
+echo_status "Removing nullos test GuestOS images to free disk space"
+for i in 1 2 3; do
+	ssh ${SSH_OPTS} "/usr/sbin/control remove_guestos nullos" 2>&1 || true
+done
+ssh ${SSH_OPTS} "df -h /data" || true
+
 do_test_provisioning
 
 do_test_push_kernel_update
