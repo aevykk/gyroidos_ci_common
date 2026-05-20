@@ -42,9 +42,9 @@ def integrationTestX86(Map target = [:]) {
 
 	echo "Using artifacts of build number determined by selector: ${artifact_build_no}"
 
-	sh "echo \"Unpacking sources\" && tar -C \"${target.workspace}\" -xf ${target.source_tarball}"
+	sh "echo \"Unpacking sources\" && tar -C \"${target.workspace}\" -xf ${target.source_tarball} && rm -f ${target.source_tarball}"
 
-	sh label: "Extract image", script: 'tar --zstd -xf gyroidosimage.tar.zst'
+	sh label: "Extract image", script: 'tar --zstd -xf gyroidosimage.tar.zst && rm -f gyroidosimage.tar.zst'
 
 
 	testscript = libraryResource('VM-container-tests.sh')	

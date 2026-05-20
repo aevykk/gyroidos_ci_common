@@ -368,8 +368,7 @@ rm -f ${PROCESS_NAME}.img
 
 if ! [[ -z "${IMGPATH}" ]];then
 	echo_status "Testing image at ${IMGPATH}"
-	# Attempt COW copy, fallback to regular cp
-	cp --reflink=auto --dereference "${IMGPATH}" "${PROCESS_NAME}.img"
+	mv -- "${IMGPATH}" "${PROCESS_NAME}.img"
 else
 	echo_status "Testing image at $(pwd)/tmp/deploy/images/genericx86-64/gyroidos_image/gyroidosimage.img"
 	# Attempt COW copy, fallback to regular cp
