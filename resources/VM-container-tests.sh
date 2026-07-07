@@ -557,10 +557,7 @@ if ! [[ -z "${HSM_SERIAL}" ]];then
 	sleep 2
 
 	start_vm
-	echo_status "Waiting for USB devices to become ready in QEMU"
-	sleep 2
-	echo_status "VM USB Devices:"
-	ssh ${SSH_OPTS} 'lsusb' 2>&1
+	wait_hsm_usb
 	STAGE="RUN2"
 
 	do_copy_configs

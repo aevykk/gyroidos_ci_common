@@ -73,7 +73,7 @@ fetch_logs() {
             echo_status "Logfile '$f' NOT found"
         fi
     done
-    for f in "${PROCESS_NAME}.qemu.stderr" "${PROCESS_NAME}.qemu.stdout"; do
+    for f in "${PROCESS_NAME}.qemu.stderr" "${PROCESS_NAME}.qemu.stdout" "${PROCESS_NAME}.qemu.usb.log"; do
         if [ -f "./$f" ]; then
             cp "./$f" "${LOG_DIR}/"
         fi
@@ -162,6 +162,57 @@ qemu_monitor () {
     # once the monitor goes idle (it keeps the connection open otherwise).
     # Returns socat's exit status; callers guard as needed.
     printf '%s\n' "$@" | socat -T2 - UNIX-CONNECT:./${PROCESS_NAME}.qemumon
+}
+
+# Runs in the guest (shipped via typeset -f). Prints the matching
+# /sys/bus/usb/devices entry and returns 0 when a device matches vid/pid/serial
+# -- the same idVendor + idProduct + serial that cml's c_hotplug looks for.
+remote_find_hsm_usb() {
+    vid="$1"; pid="$2"; ser="$3"
+    for d in /sys/bus/usb/devices/*; do
+        [ -r "$d/idVendor" ] && [ -r "$d/idProduct" ] || continue
+        read -r v < "$d/idVendor"
+        read -r p < "$d/idProduct"
+        s=""; [ -r "$d/serial" ] && read -r s < "$d/serial"
+        [ "$v" = "$vid" ] && [ "$p" = "$pid" ] && [ "$s" = "$ser" ] || continue
+        echo "match $d serial=$s"
+        return 0
+    done
+    return 1
+}
+
+# Ship remote_find_hsm_usb into the guest and run it there.
+run_remote_find_hsm_usb() {
+    ssh -q -o ConnectTimeout=5 ${SSH_OPTS} 2>/dev/null <<EOF
+$(typeset -f remote_find_hsm_usb)
+remote_find_hsm_usb "$1" "$2" "$3"
+EOF
+}
+
+# Poll until the configured HSM token (HSM_VID:HSM_PID + serial) enumerates in
+# the guest, mirroring cml's c_hotplug sysfs match, instead of blindly sleeping.
+wait_hsm_usb () {
+    local timeout_sec=30 deadline out vid pid
+    # Normalize to sysfs form (lowercase, zero-padded 4-digit hex).
+    vid="$(printf '%04x' "0x${HSM_VID}")"
+    pid="$(printf '%04x' "0x${HSM_PID}")"
+    echo_status "Waiting up to ${timeout_sec}s for HSM token ${vid}:${pid} (serial ${HSM_SERIAL}) in guest"
+    deadline=$(($(date +%s) + timeout_sec))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        [[ -z "$(pgrep $PROCESS_NAME)" ]] && { echo_error "QEMU exited while waiting for HSM token"; break; }
+        if out="$(run_remote_find_hsm_usb "$vid" "$pid" "$HSM_SERIAL")"; then
+            echo_status "HSM token ready in guest: ${out}"
+            return 0
+        fi
+        sleep 1
+    done
+    # Timed out: dump guest lsusb (did it enumerate / is the serial wrong?) and
+    # the QEMU monitor (did QEMU hand it through at all?), then fail loudly.
+    echo_error "HSM token ${vid}:${pid} (serial ${HSM_SERIAL}) not in guest after ${timeout_sec}s"
+    ssh -q -o ConnectTimeout=5 ${SSH_OPTS} 'lsusb' 2>&1 | sed 's/^/  /' || true
+    qemu_monitor "info usb" "info qtree" > "./${PROCESS_NAME}.qemu.usb.log" 2>&1 || true
+    echo_status "QEMU USB state -> ${PROCESS_NAME}.qemu.usb.log; also see ${PROCESS_NAME}.kernel.log"
+    exit 1
 }
 
 start_swtpm() {
