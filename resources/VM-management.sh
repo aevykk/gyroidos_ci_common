@@ -21,7 +21,7 @@ force_stop_vm() {
 
     sleep 2
     echo_status "Sending quit to QEMU monitor socket"
-    if echo "quit" | socat - ./${PROCESS_NAME}.qemumon;then
+    if qemu_monitor "quit" >/dev/null 2>&1;then
         echo_status "Sucessfully requested VM to exit cleanly"
     else
         echo_status "Failed to request clean VM exit"
@@ -155,6 +155,13 @@ wait_vm () {
     done
     echo_status "VM access failed after ${timeout_sec}s, exiting..."
     exit 1
+}
+
+qemu_monitor () {
+    # Send newline-separated HMP commands to the monitor socket. -T2 exits socat
+    # once the monitor goes idle (it keeps the connection open otherwise).
+    # Returns socat's exit status; callers guard as needed.
+    printf '%s\n' "$@" | socat -T2 - UNIX-CONNECT:./${PROCESS_NAME}.qemumon
 }
 
 start_swtpm() {
