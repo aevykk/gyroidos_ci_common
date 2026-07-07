@@ -37,6 +37,15 @@ err_fetch_cml_logs() {
         fi
     fi
 
+    # If the failure was a missing USB HSM device, make the very last line of the
+    # Jenkins log an unmistakable summary (the detailed error is further up / in the log).
+    if [ -n "${HSM_MISSING:-}" ]; then
+        echo ""
+        echo "================================================================"
+        echo "ERROR: USB HSM device missing in VM, see log."
+		echo "================================================================"
+    fi
+
     exit 1
 }
 trap 'err_fetch_cml_logs' EXIT INT TERM

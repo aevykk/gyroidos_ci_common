@@ -208,10 +208,13 @@ wait_hsm_usb () {
     done
     # Timed out: dump guest lsusb (did it enumerate / is the serial wrong?) and
     # the QEMU monitor (did QEMU hand it through at all?), then fail loudly.
+    echo_error "!!===>>> USB HSM DEVICE MISSING IN VM <<<===!!"
     echo_error "HSM token ${vid}:${pid} (serial ${HSM_SERIAL}) not in guest after ${timeout_sec}s"
     ssh -q -o ConnectTimeout=5 ${SSH_OPTS} 'lsusb' 2>&1 | sed 's/^/  /' || true
     qemu_monitor "info usb" "info qtree" > "./${PROCESS_NAME}.qemu.usb.log" 2>&1 || true
     echo_status "QEMU USB state -> ${PROCESS_NAME}.qemu.usb.log; also see ${PROCESS_NAME}.kernel.log"
+    # Signal the EXIT trap to end the Jenkins log with a clear one-line summary
+    HSM_MISSING=1
     exit 1
 }
 
