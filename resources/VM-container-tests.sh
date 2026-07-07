@@ -247,9 +247,6 @@ do_test_update() {
 	echo_status "ssh ${SSH_OPTS} \"truncate -s '${GUESTOS_VERSION}G' '${update_path}/root.img'\""
 	ssh ${SSH_OPTS} "truncate -s '${GUESTOS_VERSION}M' '${update_path}/root.hash.img'"
 
-	echo_status "ssh ${SSH_OPTS} \"ls -lh '${update_path}'\""
-	ssh ${SSH_OPTS} "ls -lh '${update_path}'"
-
 	cmd_control_push_guestos_config "/tmp/${GUESTOS_NAME}-${GUESTOS_VERSION}.conf /tmp/${GUESTOS_NAME}-${GUESTOS_VERSION}.sig /tmp/${GUESTOS_NAME}-${GUESTOS_VERSION}.cert" "GUESTOS_MGR_INSTALL_COMPLETED"
 
 	ssh ${SSH_OPTS} "rm -r '${update_path}'"

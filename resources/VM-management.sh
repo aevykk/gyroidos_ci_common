@@ -61,14 +61,11 @@ fetch_logs() {
     # Copy guest serial console and QEMU stderr first — these are the most
     # important artifacts when the VM never reaches SSH, and they must not be
     # skipped if disk-image extraction below fails.
-    echo_status "fetch_logs cwd: $(pwd); workspace contents:"
-    ls -al ./ | sed 's/^/  /'
     for f in "${PROCESS_NAME}.console.log" \
              "${PROCESS_NAME}.kernel.log" \
              "${PROCESS_NAME}.cml.log"; do
         if [ -f "./$f" ]; then
             cp "./$f" "${LOG_DIR}/"
-            echo_status "Logfile '$f' found"
         else
             echo_status "Logfile '$f' NOT found"
         fi
@@ -119,7 +116,7 @@ fetch_logs() {
         done
     )
 
-    echo_status "Retrieved CML logs: $(ls -al ${LOG_DIR})"
+    echo_status "Retrieved CML logs"
 }
 
 err_fetch_logs() {
