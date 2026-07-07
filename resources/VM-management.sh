@@ -144,7 +144,7 @@ wait_vm () {
             echo_status "Error: QEMU process exited"
             exit 1
         fi
-        if ssh -q -o ConnectTimeout=5 ${SSH_OPTS} "ls /data" 2>/dev/null; then
+        if ssh -q -o ConnectTimeout=5 ${SSH_OPTS} "true" 2>/dev/null; then
             echo_status "VM access was successful"
             return
         fi
