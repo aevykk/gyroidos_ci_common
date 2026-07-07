@@ -1,0 +1,16 @@
+# CML ERROR/FATAL allowlist for GyroidOS integration tests.
+#
+# During a TEST stage the CI greps the CML logs for lines containing <ERROR> or <FATAL>.
+# Any such line marks the stage UNSTABLE (yellow) while keeping the build green.
+# Add a pattern here to suppress an EXPECTED error that a test deliberately triggers.
+#
+# Format:
+#   - one Perl-compatible regex (grep -P / PCRE) pattern per line
+#   - a pattern matches if it appears anywhere in the full log line
+#   - '#' comment lines and blank lines are ignored
+#
+# This repo copy is only a template/reference. The file actually used by CI is on the
+# yocto mirror: /<YOCTO_MIRROR_DIR>/ci/cml_error_allowlist.txt  (edit it there, no merge needed).
+#
+# Example - suppress an expected "token not paired" error exercised by the ccmode test:
+# <ERROR> Requested token .* is not paired

@@ -59,6 +59,12 @@ def integrationTestX86(Map target = [:]) {
 	writeFile file: "${target.workspace}/settings.sh", text: "${testsettings}"
 	writeFile file: "${target.workspace}/testdata.sh", text: "${testdata}"
 
+	// CML ERROR/FATAL allowlist lives on the yocto mirror so it can change without a merge
+	allowlistPath = "/${env.YOCTO_MIRROR_DIR}/ci/cml_error_allowlist.txt"
+	allowlistMissing = !fileExists(allowlistPath)
+	writeFile file: "${target.workspace}/cml_error_allowlist.txt",
+		text: allowlistMissing ? "" : readFile(allowlistPath)
+
 	def execNr = env.EXECUTOR_NUMBER?.toInteger() ?: 0
 	def sshPort = target.ssh_port ?: (2222 + execNr)
 	def vncDisplay = target.vnc_display ?: (1 + execNr)
@@ -104,9 +110,58 @@ def integrationTestX86(Map target = [:]) {
 				fi
 			"""
 		}
+
+		catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+			sh label: "Check for CML ERROR/FATAL logs", script: """
+				LOGDIR="out-${target.buildtype}/cml_logs"
+				ALLOW="${target.workspace}/cml_error_allowlist.txt"
+
+				# Every ERROR/FATAL line CML wrote (keep filename:line prefix for context)
+				grep -rnP '<ERROR>|<FATAL>' "\$LOGDIR" 2>/dev/null > cml_errors.all || true
+				# Effective allowlist: drop comment (#) and blank lines
+				grep -vP '^[[:space:]]*(#|\$)' "\$ALLOW" 2>/dev/null > cml_errors.allow || true
+
+				if [ -s cml_errors.allow ]; then
+					grep -vP -f cml_errors.allow cml_errors.all > cml_errors.flagged || true
+				else
+					cp cml_errors.all cml_errors.flagged
+				fi
+
+				if [ -s cml_errors.flagged ]; then
+					echo "CML wrote ERROR/FATAL log messages - marking stage UNSTABLE:"
+					# Strip the "file:line:" prefix and leading timestamp, then group contiguous
+					# entries (same file, consecutive lines) under one fault header stamped with
+					# the first entry's timestamp.
+					prev_file=""
+					prev_line=""
+					while IFS= read -r rawline; do
+						file="\${rawline%%:*}"
+						rest="\${rawline#*:}"
+						line="\${rest%%:*}"
+						content="\${rest#*:}"
+						ts="\${content%% *}"
+						stripped="\${content#* }"
+						if [ "\$file" != "\$prev_file" ] || [ "\$line" != "\$((prev_line + 1))" ]; then
+							echo "===>> [\$ts] CML FAULT: <<==="
+						fi
+						echo "\$stripped"
+						prev_file="\$file"
+						prev_line="\$line"
+					done < cml_errors.flagged
+					exit 1
+				else
+					echo "No un-allowlisted CML ERROR/FATAL messages found"
+					exit 0
+				fi
+			"""
+		}
 	} finally {
 		echo "Archiving CML logs"
 		archiveArtifacts artifacts: 'out-**/cml_logs/**', fingerprint: true, allowEmptyArchive: true
+		if (allowlistMissing) {
+			echo "WARNING: CML error allowlist not found at ${allowlistPath} - " +
+				"treated as empty, so no benign ERROR/FATAL messages were suppressed."
+		}
 	}
 }
 
