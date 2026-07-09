@@ -11,6 +11,12 @@ IMGPATH=""
 MODE=""
 LOG_DIR=""
 
+# Hardware-target mode: when TARGET_IP is set (env or --target-ip), the suite runs
+# against a physical node over SSH instead of a local QEMU VM. SSH_HOST is the host
+# the ssh/scp commands target (localhost for QEMU port-forward, the node IP for HW).
+TARGET_IP="${TARGET_IP:-}"
+SSH_HOST="127.0.0.1"
+
 # Directory containing test PKI for image
 PKI_DIR=""
 
@@ -189,6 +195,11 @@ parse_cli() {
           OPT_CC_MODE_EXPERIMENTAL="y"
           shift
           ;;
+        --target-ip)
+        shift
+        TARGET_IP="$1"
+        shift
+        ;;
 
         *)
         echo_error "Unknown arguments specified? ($1)"
@@ -208,7 +219,16 @@ parse_cli() {
         exit 1
     fi
 
+    # Hardware target: talk to the real node over SSH (port 22). QEMU keeps using the
+    # forwarded localhost port. Default to the 'dev' image for the hardware bring-up.
+    if [[ -n "${TARGET_IP}" ]];then
+        SSH_HOST="${TARGET_IP}"
+        SSH_PORT=22
+        [[ -z "${MODE}" ]] && MODE="dev"
+        echo_status "Hardware-target mode: root@${SSH_HOST}:${SSH_PORT}"
+    fi
+
     BASE_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=${PROCESS_NAME}.vm_key -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=30"
     SCP_OPTS="-P $SSH_PORT $BASE_OPTS"
-    SSH_OPTS="-p $SSH_PORT $BASE_OPTS root@localhost"
+    SSH_OPTS="-p $SSH_PORT $BASE_OPTS root@${SSH_HOST}"
 }

@@ -58,11 +58,11 @@ for I in $(seq 1 10) ;do
 		nullos-2.conf nullos-2.sig nullos-2.cert \
 		nullos-3.conf nullos-3.sig nullos-3.cert"
 
-	if scp $SCP_OPTS $FILES root@127.0.0.1:/tmp/;then
-		echo_status "scp was successful"
+	if ( set -o pipefail; tar -cf - $FILES | ssh ${SSH_OPTS} 'tar -C /tmp -xf -' );then
+		echo_status "copy was successful"
 		break
 	elif ! [ $I -eq 10 ];then
-		echo_status "scp failed, retrying..."
+		echo_status "copy failed, retrying..."
 	else
 		echo_status "Failed to copy nullos GuestOS configs to VM, exiting..."
 		err_fetch_logs
@@ -81,11 +81,11 @@ for I in $(seq 1 10) ;do
 					kernel-$KERNEL_VERSION.cert \
 					kernel-$KERNEL_VERSION"
 
-	if scp -r $SCP_OPTS $FILES root@127.0.0.1:/tmp/;then
-		echo_status "scp was successful"
+	if ( set -o pipefail; tar -cf - $FILES | ssh ${SSH_OPTS} 'tar -C /tmp -xf -' );then
+		echo_status "copy was successful"
 		break
 	elif ! [ $I -eq 10 ];then
-		echo_status "scp failed, retrying..."
+		echo_status "copy failed, retrying..."
 	else
 		echo_status "Failed to copy kernel GuestOS configs to VM, exiting..."
 		err_fetch_logs
@@ -325,7 +325,7 @@ then
 
 	bitbake multiconfig:container:gyroidos-core
 	bitbake gyroidos-cml
-elif [[ -z "${IMGPATH}" ]]
+elif [[ -z "${IMGPATH}" ]] && [[ -z "${TARGET_IP}" ]]
 then
 	if [ ! -d "${BUILD_DIR}" ]
 	then
@@ -355,6 +355,9 @@ then
 		exit 1
 	fi
 fi
+
+# QEMU-only setup below: on hardware the node is already flashed + booted, so skip it.
+if [[ -z "${TARGET_IP}" ]];then
 
 # Ensure VM is not running
 # -----------------------------------------------
@@ -415,6 +418,8 @@ else
 	exit 1
 fi
 
+fi # end QEMU-only setup (skipped when TARGET_IP is set)
+
 STAGE="BOOT1"
 # Start test VM
 start_vm
@@ -425,7 +430,7 @@ STAGE="RUN1"
 echo_status "Retrieving VM host key"
 for I in $(seq 1 10) ;do
 	echo_status "Scanning for VM host key on port $SSH_PORT"
-	if ssh-keyscan -T 10 -p $SSH_PORT -H 127.0.0.1 > ${PROCESS_NAME}.vm_key ;then
+	if ssh-keyscan -T 10 -p $SSH_PORT -H ${SSH_HOST} > ${PROCESS_NAME}.vm_key ;then
 		echo_status "Got VM host key: $!"
 		break
 	elif [ "10" = "$I" ];then
@@ -465,8 +470,8 @@ then
 	echo_status "Copying root CA at ${PKI_DIR}/ssig_rootca.cert to image as requested"
 	for I in $(seq 1 10) ;do
 		echo_status "Trying to copy rootca cert"
-		if scp -q $SCP_OPTS ${PKI_DIR}/ssig_rootca.cert root@127.0.0.1:/tmp/;then
-			echo_status "scp was sucessful"
+		if ( set -o pipefail; tar -cf - -C "${PKI_DIR}" ssig_rootca.cert | ssh ${SSH_OPTS} 'tar -C /tmp -xf -' );then
+			echo_status "copy was successful"
 			break
 		elif ! [ $I -eq 10 ];then
 			echo_status "Failed to copy root CA, retrying..."
@@ -621,14 +626,18 @@ do_test_update "nullos" "3"
 
 do_test_provisioning
 
-do_test_push_kernel_update
+# A/B kernel-update slot switch relies on UEFI NVRAM (BootNext/BootCurrent), which the
+# PXE-first hardware image intentionally omits — skip it in hardware-target mode.
+if [[ -z "${TARGET_IP}" ]];then
+	do_test_push_kernel_update
 
-STAGE="BOOT4"
-cmd_control_reboot
-wait_vm
-STAGE="RUN4"
+	STAGE="BOOT4"
+	cmd_control_reboot
+	wait_vm
+	STAGE="RUN4"
 
-do_test_check_kernel_version
+	do_test_check_kernel_version
+fi
 
 if [[ "production" == "${MODE}" ]];then
 	STAGE="PREPARE SWTPM"

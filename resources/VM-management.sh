@@ -19,6 +19,12 @@ sync_to_disk() {
 force_stop_vm() {
     sync_to_disk
 
+    if [ -n "${TARGET_IP:-}" ];then
+        # Hardware: no QEMU to quit; leave the node powered (orchestrator owns power).
+        echo_status "Hardware-target mode: leaving node ${SSH_HOST} running"
+        return 0
+    fi
+
     sleep 2
     echo_status "Sending quit to QEMU monitor socket"
     if echo "quit" | socat - ./${PROCESS_NAME}.qemumon;then
@@ -57,6 +63,16 @@ fetch_logs() {
     fi
 
     mkdir -p "${LOG_DIR}"
+
+    if [ -n "${TARGET_IP:-}" ];then
+        # Hardware: no local disk image to extract; stream the cml logs over SSH as a
+        # zstd-compressed tar on stdout and unpack locally (single connection).
+        echo_status "Hardware-target mode: taring logs from ${SSH_HOST} over SSH"
+        ssh ${SSH_OPTS} 'tar -C / -cf - data/logs userdata/logs 2>/dev/null' \
+            | tar -C "${LOG_DIR}" -xf - 2>/dev/null || true
+        echo_status "Retrieved logs:"; ls -alR "${LOG_DIR}" 2>/dev/null | sed 's/^/  /'
+        return 0
+    fi
 
     # Copy guest serial console and QEMU stderr first — these are the most
     # important artifacts when the VM never reaches SSH, and they must not be
@@ -138,12 +154,15 @@ trap 'err_fetch_logs' EXIT INT TERM
 
 wait_vm () {
     local timeout_sec=300
+    # Real hardware POST + PXE + sanboot is much slower than QEMU; allow longer.
+    [ -n "${TARGET_IP:-}" ] && timeout_sec="${HW_WAIT:-600}"
     echo_status "Waiting up to ${timeout_sec}s for VM to become available"
     # Give QEMU a moment to register its process name before pgrep checks.
     sleep 3
     local deadline=$(($(date +%s) + timeout_sec))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        if [[ -z "$(pgrep $PROCESS_NAME)" ]]; then
+        # QEMU liveness check only applies to the local VM, not a remote node.
+        if [ -z "${TARGET_IP:-}" ] && [[ -z "$(pgrep $PROCESS_NAME)" ]]; then
             echo_status "Error: QEMU process exited"
             exit 1
         fi
@@ -178,6 +197,12 @@ align_image () {
 }
 
 start_vm() {
+	if [ -n "${TARGET_IP:-}" ];then
+		# Hardware: the node is already flashed and booted by the orchestrator.
+		echo_status "Hardware-target mode: waiting for node ${SSH_HOST} instead of launching QEMU"
+		wait_vm
+		return
+	fi
 	ovmf_code=""
 	if [ -f "/usr/share/OVMF/OVMF_CODE.fd" ];then
 		ovmf_code="/usr/share/OVMF/OVMF_CODE.fd"

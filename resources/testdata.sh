@@ -488,11 +488,11 @@ for I in $(seq 1 10) ;do
 
 	fi
 
-	if scp $SCP_OPTS $FILES root@127.0.0.1:/tmp/;then
-		echo_status "scp was successful"
+	if ( set -o pipefail; tar -cf - $FILES | ssh ${SSH_OPTS} 'tar -C /tmp -xf -' );then
+		echo_status "copy was successful"
 		break
 	elif ! [ $I -eq 10 ];then
-		echo_status "scp failed, retrying..."
+		echo_status "copy failed, retrying..."
 	else
 		echo_status "Failed to copy container configs to VM, exiting..."
 		err_fetch_logs
