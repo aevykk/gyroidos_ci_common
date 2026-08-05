@@ -91,7 +91,9 @@ def integrationTestX86(Map target = [:]) {
 	try {
 		// HSM-based tests need locking
 		// Negated to be defensive against bugs when adding new HSM types
-		if (!(target.buildtype in ['asan', 'ccmode', 'dev', 'production'])){
+		// external_lock: caller already holds the token lock (taken outside its
+		// node block) - must not lock again, lockable resources are not reentrant
+		if (!target.external_lock && !(target.buildtype in ['asan', 'ccmode', 'dev', 'production'])){
 			echo "Acquiring lock '${target.buildtype}' for integration test"
 			lock(target.buildtype) {
 				runActualTest()
@@ -187,6 +189,7 @@ def call(Map target) {
 	// selector: Build selector for CopyArtifact step
 	// schsm_serial: serial of test schsm
 	// schsm_pin: Pin of test schsm
+	// external_lock: if true, caller holds the HSM token lock; internal locking is skipped
 	// extra_opts: Additional flags for VM-container-test.sh
 
 	echo "Running on host: ${NODE_NAME}"
