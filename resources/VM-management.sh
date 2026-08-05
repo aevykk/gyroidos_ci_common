@@ -230,9 +230,21 @@ align_image () {
     local hosting_mount="$(df --output=target "$img_path" | tail -1)"
     # Get filesystem block size
     local fs_bsize="$(stat -fc%s "$hosting_mount" 2>/dev/null || echo 4096)"
-    # Resize to be a multiple of the fs block size
+    local old_size="$(stat -c%s "$img_path")"
+    local new_size=$(( ((old_size + fs_bsize - 1) / fs_bsize) * fs_bsize ))
+    if (( new_size == old_size ));then
+        return 0
+    fi
+    # Resize to be a multiple of the fs block size (needed for O_DIRECT /
+    # cache=directsync on hosts whose fs block size exceeds 512B)
     echo_status "Resizing ${1} to match fs block size of ${fs_bsize}B"
-    qemu-img resize -f raw "$img_path" $(( (($(stat -c%s "$img_path") + $fs_bsize - 1) / $fs_bsize) * $fs_bsize ))
+    qemu-img resize -f raw "$img_path" "$new_size"
+    # Relocate the backup header to the new last LBA -- only for images that
+    # actually carry a GPT (the .ext4fs disk is a bare filesystem).
+    if [[ "$(dd if="$img_path" bs=1 skip=512 count=8 2>/dev/null)" == "EFI PART" ]];then
+        echo_status "Relocating backup GPT header of ${1} to new end of disk"
+        sfdisk --relocate gpt-bak-std "$img_path"
+    fi
 }
 
 start_vm() {
