@@ -72,8 +72,9 @@ def integrationTestX86(Map target = [:]) {
 
 	def runActualTest = {
 		catchError(message: 'Integration test failed', stageResult: 'FAILURE') {
-			sh label: "Perform integration test", script: """
-				if ! [ -z "${target.hsm_serial}" ];then
+			// shebang: [[ ]] needs bash; Jenkins' default is plain sh -xe
+			sh label: "Perform integration test", script: """#!/bin/bash -e
+				if [[ -n "${target.hsm_serial}" ]];then
 					schsm_opts="--enable-hsm ${target.hsm_serial} ${target.hsm_vid} ${target.hsm_pid} ${target.hsm_pin}"
 
 					echo "Testing image with \'\$schsm_opts\' and mode \'${target.test_mode}\'"
@@ -100,8 +101,8 @@ def integrationTestX86(Map target = [:]) {
 		}
 
 		catchError(message: 'ASAN output detected', stageResult: 'FAILURE') {
-			sh label: "Check whether ASAN logs generated", script: """
-				if ! [ -z "\$(find out-${target.buildtype}/cml_logs -name '*asan*')" ];then
+			sh label: "Check whether ASAN logs generated", script: """#!/bin/bash -e
+				if [[ -n "\$(find out-${target.buildtype}/cml_logs -name '*asan*')" ]];then
 					echo "Found ASAN logs"
 					exit 1
 				else
@@ -112,7 +113,8 @@ def integrationTestX86(Map target = [:]) {
 		}
 
 		catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-			sh label: "Check for CML ERROR/FATAL logs", script: """
+			sh label: "Check for CML ERROR/FATAL logs", script: """#!/bin/bash -e
+				set +x
 				LOGDIR="out-${target.buildtype}/cml_logs"
 				ALLOW="${target.workspace}/cml_error_allowlist.txt"
 
@@ -121,13 +123,22 @@ def integrationTestX86(Map target = [:]) {
 				# Effective allowlist: drop comment (#) and blank lines
 				grep -vP '^[[:space:]]*(#|\$)' "\$ALLOW" 2>/dev/null > cml_errors.allow || true
 
-				if [ -s cml_errors.allow ]; then
-					grep -vP -f cml_errors.allow cml_errors.all > cml_errors.flagged || true
+				if [[ -s cml_errors.allow ]]; then
+					# Older GNU grep rejects -P with multiple patterns (-f), so join the
+					# allowlist into one alternation. grep -v exits 1 when every line is
+					# filtered (fine); >1 is a real error and must not pass silently.
+					ALLOW_RE="\$(sed 's/.*/(&)/' cml_errors.allow | paste -sd'|' -)"
+					rc=0
+					grep -vP -- "\$ALLOW_RE" cml_errors.all > cml_errors.flagged || rc=\$?
+					if [[ \$rc -gt 1 ]]; then
+						echo "ERROR: allowlist filtering failed (grep exit \$rc) - check allowlist syntax"
+						exit 1
+					fi
 				else
 					cp cml_errors.all cml_errors.flagged
 				fi
 
-				if [ -s cml_errors.flagged ]; then
+				if [[ -s cml_errors.flagged ]]; then
 					echo "CML wrote ERROR/FATAL log messages - marking stage UNSTABLE:"
 					# Strip the "file:line:" prefix and leading timestamp, then group contiguous
 					# entries (same file, consecutive lines) under one fault header stamped with
@@ -141,8 +152,8 @@ def integrationTestX86(Map target = [:]) {
 						content="\${rest#*:}"
 						ts="\${content%% *}"
 						stripped="\${content#* }"
-						if [ "\$file" != "\$prev_file" ] || [ "\$line" != "\$((prev_line + 1))" ]; then
-							echo "===>> [\$ts] CML FAULT: <<==="
+						if [[ "\$file" != "\$prev_file" || "\$line" != \$((prev_line + 1)) ]]; then
+							printf '\\n===>> [%s] CML FAULT: <<===' "\$ts"
 						fi
 						echo "\$stripped"
 						prev_file="\$file"
