@@ -5,12 +5,17 @@
 # Add a pattern here to suppress an EXPECTED error that a test deliberately triggers.
 #
 # Format:
-#   - one Perl-compatible regex (grep -P / PCRE) pattern per line
-#   - a pattern matches if it appears anywhere in the full log line
+#   - one Python 're' regex pattern per line (evaluated by parse_dedup_cml_errors.py)
+#   - a pattern matches if it appears anywhere in 'file:line:content' of a log line
 #   - '#' comment lines and blank lines are ignored
 #
 # This repo copy is only a template/reference. The file actually used by CI is on the
 # yocto mirror: /<YOCTO_MIRROR_DIR>/ci/cml_error_allowlist.txt  (edit it there, no merge needed).
 #
+# Log lines look like: TIMESTAMP [pid] <ERROR> source.c+NNN: message
+# Match the source location with an optional '(?:\S+\.c\+\d+: )?' segment instead
+# of pinning line numbers (they shift with every source change); optional also
+# keeps logs of older CML versions without source locations matching.
+#
 # Example - suppress an expected "token not paired" error exercised by the ccmode test:
-# <ERROR> Requested token .* is not paired
+# <ERROR> (?:\S+\.c\+\d+: )?Requested token .* is not paired

@@ -47,17 +47,19 @@ def integrationTestX86(Map target = [:]) {
 	sh label: "Extract image", script: 'tar --zstd -xf gyroidosimage.tar.zst && rm -f gyroidosimage.tar.zst'
 
 
-	testscript = libraryResource('VM-container-tests.sh')	
+	testscript = libraryResource('VM-container-tests.sh')
 	container_commands = libraryResource('VM-container-commands.sh')
 	vm_commands = libraryResource('VM-management.sh')
 	testsettings = libraryResource('settings.sh')
-	testdata = libraryResource('testdata.sh')	
+	testdata = libraryResource('testdata.sh')
+	cml_error_check = libraryResource('parse_dedup_cml_errors.py')
 
 	writeFile file: "${target.workspace}/VM-container-tests.sh", text: "${testscript}"
 	writeFile file: "${target.workspace}/VM-container-commands.sh", text: "${container_commands}"
 	writeFile file: "${target.workspace}/VM-management.sh", text: "${vm_commands}"
 	writeFile file: "${target.workspace}/settings.sh", text: "${testsettings}"
 	writeFile file: "${target.workspace}/testdata.sh", text: "${testdata}"
+	writeFile file: "${target.workspace}/parse_dedup_cml_errors.py", text: "${cml_error_check}"
 
 	// CML ERROR/FATAL allowlist lives on the yocto mirror so it can change without a merge
 	allowlistPath = "/${env.YOCTO_MIRROR_DIR}/ci/cml_error_allowlist.txt"
@@ -116,61 +118,18 @@ def integrationTestX86(Map target = [:]) {
 
 		catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
 			sh label: "Check for CML ERROR/FATAL logs", script: """#!/bin/bash -e
-				set +x
-				LOGDIR="out-${target.buildtype}/cml_logs"
-				ALLOW="${target.workspace}/cml_error_allowlist.txt"
-
-				# Every ERROR/FATAL line CML wrote (keep filename:line prefix for context)
-				grep -rnP '<ERROR>|<FATAL>' "\$LOGDIR" 2>/dev/null > cml_errors.all || true
-				# Effective allowlist: drop comment (#) and blank lines
-				grep -vP '^[[:space:]]*(#|\$)' "\$ALLOW" 2>/dev/null > cml_errors.allow || true
-
-				if [[ -s cml_errors.allow ]]; then
-					# Older GNU grep rejects -P with multiple patterns (-f), so join the
-					# allowlist into one alternation. grep -v exits 1 when every line is
-					# filtered (fine); >1 is a real error and must not pass silently.
-					ALLOW_RE="\$(sed 's/.*/(&)/' cml_errors.allow | paste -sd'|' -)"
-					rc=0
-					grep -vP -- "\$ALLOW_RE" cml_errors.all > cml_errors.flagged || rc=\$?
-					if [[ \$rc -gt 1 ]]; then
-						echo "ERROR: allowlist filtering failed (grep exit \$rc) - check allowlist syntax"
-						exit 1
-					fi
-				else
-					cp cml_errors.all cml_errors.flagged
-				fi
-
-				if [[ -s cml_errors.flagged ]]; then
-					echo "CML wrote ERROR/FATAL log messages - marking stage UNSTABLE:"
-					# Strip the "file:line:" prefix and leading timestamp, then group contiguous
-					# entries (same file, consecutive lines) under one fault header stamped with
-					# the first entry's timestamp.
-					prev_file=""
-					prev_line=""
-					while IFS= read -r rawline; do
-						file="\${rawline%%:*}"
-						rest="\${rawline#*:}"
-						line="\${rest%%:*}"
-						content="\${rest#*:}"
-						ts="\${content%% *}"
-						stripped="\${content#* }"
-						if [[ "\$file" != "\$prev_file" || "\$line" != \$((prev_line + 1)) ]]; then
-							printf '\\n===>> [%s] CML FAULT: <<===' "\$ts"
-						fi
-						echo "\$stripped"
-						prev_file="\$file"
-						prev_line="\$line"
-					done < cml_errors.flagged
-					exit 1
-				else
-					echo "No un-allowlisted CML ERROR/FATAL messages found"
-					exit 0
-				fi
+				python3 "${target.workspace}/parse_dedup_cml_errors.py" \\
+					--log-dir "out-${target.buildtype}/cml_logs" \\
+					--allowlist "${target.workspace}/cml_error_allowlist.txt" \\
+					--json-out "out-${target.buildtype}/cml_errors.json" \\
+					--job-name "${target.buildtype}"
 			"""
 		}
 	} finally {
 		echo "Archiving CML logs"
-		archiveArtifacts artifacts: 'out-**/cml_logs/**', fingerprint: true, allowEmptyArchive: true
+		// cml_errors.json feeds the cross-job summary stage (stepCmlErrorSummary)
+		archiveArtifacts artifacts: 'out-**/cml_logs/**, out-**/cml_errors.json',
+			fingerprint: true, allowEmptyArchive: true
 		if (allowlistMissing) {
 			echo "WARNING: CML error allowlist not found at ${allowlistPath} - " +
 				"treated as empty, so no benign ERROR/FATAL messages were suppressed."
